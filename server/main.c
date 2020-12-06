@@ -5,7 +5,7 @@
 
 void ReadPort(int* port, int argc, char* argv[]) {
     if(argc == 1) {
-        printf("Please run again with port in arguments\n");
+        printf("Please run again with port in arguments.\n");
         _exit(1);
     } else {
         for(int i = 0; i < strlen(argv[1]); i++) {
