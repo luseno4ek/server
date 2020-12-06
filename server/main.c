@@ -1,10 +1,53 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 #include <netinet/in.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+
+//___________________Run_Server:___________________
+
+struct User {
+    int socket;
+    char* name;
+    int name_size;
+};
+
+struct UsersFD {
+    struct User* user;
+    int size;
+    int capacity;
+};
+
+//___________________Small_Functions:___________________
+
+void ResetSet(struct UsersFD* users, fd_set* set, int socket_serv) {
+    int max_d = socket_serv;
+    FD_ZERO(set);
+    FD_SET(socket_serv, set);
+    for(int i = 0; i < users->size; i++) {
+        int current_socket = users->user[i].socket;
+        FD_SET(current_socket, set);
+        if(current_socket > max_d) {
+            max_d = current_socket;
+        }
+    }
+}
+
+//___________________UsersFD:___________________
+
+void InitUsersFD(struct UsersFD* users) {
+    users->size = 0;
+    users->capacity = 2;
+    users->user = (struct User*) malloc(sizeof(struct User) * users->capacity);
+}
+
+//___________________New_User:___________________
+
+
+//___________________Run_Server:___________________
 
 void ReadPort(int* port, int argc, char* argv[]) {
     if(argc == 1) {
@@ -38,9 +81,19 @@ void InitServer(int* socket_serv, int port) {
     }
 }
 
+void RunServer(int socket_serv) {
+    struct UsersFD users;
+    InitUsersFD(&users);
+    while(true) {
+        fd_set set;
+        ResetSet(&users, &set, socket_serv);
+    }
+}
+
 int main(int argc, char* argv[]) {
     int port = 0;
     ReadPort(&port, argc, argv);
     int socket_serv;
     InitServer(&socket_serv, port);
+    RunServer(socket_serv);
 }
