@@ -9,10 +9,17 @@
 
 //___________________Types:___________________
 
+struct String {
+    char* data;
+    int capacity;
+    ssize_t size;
+};
+
 struct User {
     int socket;
     char* name;
     int name_size;
+    struct String message;
 };
 
 struct UsersFD {
@@ -34,15 +41,10 @@ bool IsStrEq(char* s1, char* s2) {
     return *s1 == *s2;
 }
 
-char* GetString(char* buf, int* size) {
-    char* buf2 = (char*) malloc(*size * sizeof(char));
-    int i;
-    for(i = 0; buf[i] != '\r'; i++) {
-        buf2[i] = buf[i];
-    }
-    buf2[i] = '\0';
-    *size = i;
-    return buf2;
+int GetStringSize(char* buf) {
+    int i = 0;
+    for(i = 0; buf[i] != '\0'; i++) {}
+    return i;
 }
 
 //___________________Chat_State:___________________
@@ -88,6 +90,33 @@ void SelectFromSet(struct UsersFD* users, fd_set* set, int max_d) {
     }
 }
 
+//_________________String_Usage:_________________//
+
+void InitString(struct String* s) {
+    s->size = 0;
+    s->capacity = 32;
+    s->data = (char*) malloc(s->capacity * sizeof(char));
+}
+
+void FreeString(struct String* s) {
+    free(s->data);
+}
+
+void AppendString(struct String* s, struct String* add_s) {
+    s->capacity = (int) add_s->size + (int) s->size;
+    s->data = (char*) realloc(s->data, s->capacity * sizeof(char));
+    for(int i = 0; i <= add_s->size; i++) {
+        s->data[s->size + i] = add_s->data[i];
+    }
+    s->size += add_s->size;
+    FreeString(add_s);
+}
+
+char* GetSString(struct String* s) {
+    (s->data)[s->size - 1] = '\0';
+    return s->data;
+}
+
 //___________________UsersFD_Usage:___________________
 
 void InitUsersFD(struct UsersFD* users) {
@@ -109,6 +138,7 @@ void AppendUsersFD(struct UsersFD* users, int socket_serv) {
     } else {
         users->user[users->size - 1].socket = res;
         users->user[users->size - 1].name = NULL;
+        InitString(&(users->user[users->size - 1].message));
         printf("# user_%d joined the chat\n", users->size);
     }
 }
@@ -177,7 +207,7 @@ void Greetings(struct UsersFD* users, int index) {
 //___________________Name_Changing:___________________
 
 bool IsNameCorrect(char* buf, int size) {
-    if(size == 17) {
+    if((size > 16) || (size < 3)) {
         return false;
     }
     for(int i = 0; i < size; i++) {
@@ -198,32 +228,21 @@ bool IsNameMatched(struct UsersFD* users, char* name) {
     return false;
 }
 
-void SelectName(struct UsersFD* users, int index) {
+void SelectName(struct UsersFD* users, int index, char* buf) {
     int user_socket = users->user[index].socket;
-    char* buf = (char*) malloc(17 * sizeof(char));
-    size_t read_res = read(user_socket, buf, 17);
-    if(read_res == 0) {
-        SayBye(users, index);
-        DeleteUser(users, index);
-        return;
-    } else {
-        int size;
-        buf = GetString(buf, &size);
-        if(IsNameCorrect(buf, size)) {
-            if(!IsNameMatched(users, buf)) {
-                users->user[index].name = buf;
-                users->user[index].name_size = size;
-                Greetings(users, index);
-                return;
-            } else {
-                write(user_socket, "--[Server]: This name is already taken\n", 39);
-                
-            }
+    int size = GetStringSize(buf);
+    if(IsNameCorrect(buf, size)) {
+        if(!IsNameMatched(users, buf)) {
+            users->user[index].name = buf;
+            users->user[index].name_size = size;
+            Greetings(users, index);
+            return;
         } else {
-            write(user_socket, "--[Server]: Invalid name\n", 25);
+            write(user_socket, "--[Server]: This name is already taken\n", 39);
         }
+    } else {
+        write(user_socket, "--[Server]: Invalid name\n", 25);
     }
-    free(buf);
     write(user_socket, "--[Server]: Choose your name: ", 30);
 }
 
@@ -305,8 +324,11 @@ bool UserWannaLeave(char* buf) {
 }
 
 void SendMessage(struct UsersFD* users, int sender, char* message) {
-    int size;
-    message = GetString(message, &size);
+    int size = GetStringSize(message);
+    if(users->user[sender].name == NULL) {
+        SelectName(users, sender, message);
+        return;
+    }
     if(UserWannaLeave(message)) {
         SayBye(users, sender);
         DeleteUser(users, sender);
@@ -327,18 +349,45 @@ void SendMessage(struct UsersFD* users, int sender, char* message) {
     }
 }
 
+//___________________Reading_Message:___________________
+
+bool IsEndOfMessage(struct String* s) {
+    if(s->data[s->size - 1] == '\r') {
+        return true;
+    }
+    return false;
+}
+
+char* ReadString(struct UsersFD* users, int index) {
+    int user_socket = users->user[index].socket;
+    struct String s;
+    InitString(&s);
+    ssize_t read_res = read(user_socket, s.data, s.capacity);
+    s.size = read_res - 1;
+    if(read_res == 0) {
+        SayBye(users, index);
+        DeleteUser(users, index);
+        FreeString(&s);
+        return NULL;
+    } else {
+        AppendString(&(users->user[index].message), &s);
+        if(IsEndOfMessage(&s)) {
+            char* message = GetSString(&(users->user[index].message));
+            return message;
+        } else {
+            return NULL;
+        }
+    }
+}
+
 void ReadFromUsers(struct UsersFD* users, fd_set* set) {
     for(int i = 0; i < users->size; i++) {
         int current_socket = users->user[i].socket;
         if(FD_ISSET(current_socket, set)) {
-            if(users->user[i].name == NULL) {
-                SelectName(users, i);
-            } else {
-                char* buf = GetMessage(users, i);
-                if(buf != NULL) {
-                    SendMessage(users, i, buf);
-                    free(buf);
-                }
+            char* buf = ReadString(users, i);
+            if(buf != NULL) {
+                SendMessage(users, i, buf);
+                InitString(&(users->user[i].message));
             }
         }
     }
@@ -358,7 +407,8 @@ void RunServer(int socket_serv) {
 
 int main(int argc, char* argv[]) {
     int port = 0;
-    ReadPort(&port, argc, argv);
+    //ReadPort(&port, argc, argv);
+    scanf("%d", &port);
     int socket_serv;
     InitServer(&socket_serv, port);
     RunServer(socket_serv);
