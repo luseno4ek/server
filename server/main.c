@@ -62,7 +62,7 @@ void SendChatState(struct UsersFD* users) {
     }
 }
 
-//___________________Small_Functions:___________________
+//___________________Set_Usage:___________________
 
 int ResetSet(struct UsersFD* users, fd_set* set, int socket_serv) {
     int max_d = socket_serv;
@@ -87,6 +87,44 @@ void SelectFromSet(struct UsersFD* users, fd_set* set, int max_d) {
         SendChatState(users);
     }
 }
+
+//___________________UsersFD_Usage:___________________
+
+void InitUsersFD(struct UsersFD* users) {
+    users->size = 0;
+    users->capacity = 2;
+    users->user = (struct User*) malloc(sizeof(struct User) * users->capacity);
+}
+
+void AppendUsersFD(struct UsersFD* users, int socket_serv) {
+    users->size++;
+    if(users->size == users->capacity) {
+        users->capacity *= 2;
+        users->user = (struct User*) realloc(users->user, users->capacity * sizeof(struct User));
+    }
+    int res = accept(socket_serv, NULL, NULL);
+    if(res == -1) {
+        printf("ERROR: fail to accept user\n");
+        _exit(3);
+    } else {
+        users->user[users->size - 1].socket = res;
+        users->user[users->size - 1].name = NULL;
+        printf("# user_%d joined the chat\n", users->size);
+    }
+}
+
+void DeleteUser(struct UsersFD* users, int leaving_user) {
+    int leaving_socket = users->user[leaving_user].socket;
+    shutdown(leaving_socket, 2);
+    close(leaving_socket);
+    free(users->user[leaving_user].name);
+    for(int i = leaving_user; i < users->size; i++) {
+        users->user[i] = users->user[i + 1];
+    }
+    users->size--;
+}
+
+//___________________Greeting_and_FareWell:___________________
 
 char* CreateName(struct UsersFD* users) {
     char* leaving_name = (char*) malloc(7 * sizeof(char));
@@ -136,55 +174,7 @@ void Greetings(struct UsersFD* users, int index) {
     }
 }
 
-//___________________UsersFD:___________________
-
-void InitUsersFD(struct UsersFD* users) {
-    users->size = 0;
-    users->capacity = 2;
-    users->user = (struct User*) malloc(sizeof(struct User) * users->capacity);
-}
-
-void AppendUsersFD(struct UsersFD* users, int socket_serv) {
-    users->size++;
-    if(users->size == users->capacity) {
-        users->capacity *= 2;
-        users->user = (struct User*) realloc(users->user, users->capacity * sizeof(struct User));
-    }
-    int res = accept(socket_serv, NULL, NULL);
-    if(res == -1) {
-        printf("ERROR: fail to accept user\n");
-        _exit(3);
-    } else {
-        users->user[users->size - 1].socket = res;
-        users->user[users->size - 1].name = NULL;
-        printf("# user_%d joined the chat\n", users->size);
-    }
-}
-
-void DeleteUser(struct UsersFD* users, int leaving_user) {
-    int leaving_socket = users->user[leaving_user].socket;
-    shutdown(leaving_socket, 2);
-    close(leaving_socket);
-    free(users->user[leaving_user].name);
-    for(int i = leaving_user; i < users->size; i++) {
-        users->user[i] = users->user[i + 1];
-    }
-    users->size--;
-}
-
-
-//___________________New_User:___________________
-
-bool IsServerFull(struct UsersFD* users) {
-    const int MAX_CAPACITY = 3;
-    if(users->size > MAX_CAPACITY) {
-        write(users->user[users->size - 1].socket, "--[Server]: Sorry the chat is full\n", 36);
-        printf("# user_%d is removed, because the chat is full\n", users->size);
-        DeleteUser(users, users->size - 1);
-        return true;
-    }
-    return false;
-}
+//___________________Name_Changing:___________________
 
 bool IsNameCorrect(char* buf, int size) {
     if(size == 17) {
@@ -235,6 +225,19 @@ void SelectName(struct UsersFD* users, int index) {
     }
     free(buf);
     write(user_socket, "--[Server]: Choose your name: ", 30);
+}
+
+//___________________New_User:___________________
+
+bool IsServerFull(struct UsersFD* users) {
+    const int MAX_CAPACITY = 3;
+    if(users->size > MAX_CAPACITY) {
+        write(users->user[users->size - 1].socket, "--[Server]: Sorry the chat is full\n", 36);
+        printf("# user_%d is removed, because the chat is full\n", users->size);
+        DeleteUser(users, users->size - 1);
+        return true;
+    }
+    return false;
 }
 
 void AcceptUser(struct UsersFD* users, fd_set* set, int socket_serv) {
