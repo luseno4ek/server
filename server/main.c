@@ -112,7 +112,7 @@ void AppendString(struct String* s, struct String* add_s) {
     FreeString(add_s);
 }
 
-char* GetSString(struct String* s) {
+char* GetString(struct String* s) {
     (s->data)[s->size - 1] = '\0';
     return s->data;
 }
@@ -148,6 +148,7 @@ void DeleteUser(struct UsersFD* users, int leaving_user) {
     shutdown(leaving_socket, 2);
     close(leaving_socket);
     free(users->user[leaving_user].name);
+    FreeString(&(users->user[leaving_user].message));
     for(int i = leaving_user; i < users->size; i++) {
         users->user[i] = users->user[i + 1];
     }
@@ -269,7 +270,7 @@ void AcceptUser(struct UsersFD* users, fd_set* set, int socket_serv) {
     }
 }
 
-//___________________Run_Server:___________________
+//___________________Init_Server:___________________
 
 void ReadPort(int* port, int argc, char* argv[]) {
     if(argc == 1) {
@@ -304,17 +305,7 @@ void InitServer(int* socket_serv, int port) {
     printf("# chat is running at port %d\n", port);
 }
 
-char* GetMessage(struct UsersFD* users, int index) {
-    int current_socket = users->user[index].socket;
-    char* buf = (char*) malloc(1024 * sizeof(char));
-    ssize_t read_res = read(current_socket, buf, 1023);
-    if(read_res == 0) {
-        SayBye(users, index);
-        DeleteUser(users, index);
-        return NULL;
-    }
-    return buf;
-}
+//___________________Sending_Message:___________________
 
 bool UserWannaLeave(char* buf) {
     if(IsStrEq("bye!", buf)) {
@@ -372,7 +363,7 @@ char* ReadString(struct UsersFD* users, int index) {
     } else {
         AppendString(&(users->user[index].message), &s);
         if(IsEndOfMessage(&s)) {
-            char* message = GetSString(&(users->user[index].message));
+            char* message = GetString(&(users->user[index].message));
             return message;
         } else {
             return NULL;
@@ -393,6 +384,8 @@ void ReadFromUsers(struct UsersFD* users, fd_set* set) {
     }
 }
 
+//___________________Run_Server:___________________
+
 void RunServer(int socket_serv) {
     struct UsersFD users;
     InitUsersFD(&users);
@@ -407,8 +400,7 @@ void RunServer(int socket_serv) {
 
 int main(int argc, char* argv[]) {
     int port = 0;
-    //ReadPort(&port, argc, argv);
-    scanf("%d", &port);
+    ReadPort(&port, argc, argv);
     int socket_serv;
     InitServer(&socket_serv, port);
     RunServer(socket_serv);
