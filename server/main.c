@@ -24,6 +24,9 @@ struct UsersFD {
 //___________________Helpful_Functions:___________________
 
 bool IsStrEq(char* s1, char* s2) {
+    if((s1 == NULL) || (s2 == NULL)) {
+        return false;
+    }
     while(*s1 != '\0' && *s2 != '\0' && *s1 == *s2) {
         s1++;
         s2++;
@@ -50,10 +53,12 @@ void SendChatState(struct UsersFD* users) {
     size[0] = users->size + 48;
     size[1] = '\0';
     for(int i = 0; i < users->size; i++) {
-        int current_socket = users->user[i].socket;
-        write(current_socket, "--[Server]: chat server is running (", 36);
-        write(current_socket, size, 2);
-        write(current_socket, " users are connected)\n", 22);
+        if(users->user[i].name != NULL) {
+            int current_socket = users->user[i].socket;
+            write(current_socket, "--[Server]: chat server is running (", 36);
+            write(current_socket, size, 2);
+            write(current_socket, " users are connected)\n", 22);
+        }
     }
 }
 
@@ -102,28 +107,32 @@ void SayBye(struct UsersFD* users, int leaving_user) {
         leaving_name = CreateName(users);
         name_size = 7;
     }
-    printf("# %s left the chat/n", leaving_name);
+    printf("# %s left the chat\n", leaving_name);
     for(int i = 0; i < users->size; i++) {
-        int current_socket = users->user[i].socket;
-        write(current_socket, "--[Server]: ", 12);
-        write(current_socket, leaving_name, name_size);
-        write(current_socket, " left the chat.\n", 16);
+        if((users->user[i].name != NULL) && (i != leaving_user)) {
+            int current_socket = users->user[i].socket;
+            write(current_socket, "--[Server]: ", 12);
+            write(current_socket, leaving_name, name_size);
+            write(current_socket, " left the chat.\n", 16);
+        }
     }
 }
 
-void Greetings(struct UsersFD* users) {
-    char* new_name = users->user[users->size - 1].name;
-    int name_size = users->user[users->size - 1].name_size;
-    printf("# user_%d changed name to '%s'\n", users->size, new_name);
+void Greetings(struct UsersFD* users, int index) {
+    char* new_name = users->user[index].name;
+    int name_size = users->user[index].name_size;
+    printf("# user_%d changed name to '%s'\n", index + 1, new_name);
     for(int i = 0; i < users->size; i++) {
-        int current_socket = users->user[i].socket;
-        write(current_socket, "--[Server]: Welcome", 19);
-        if(i == users->size - 1) {
-            write(current_socket, ",", 1);
+        if(users->user[i].name != NULL) {
+            int current_socket = users->user[i].socket;
+            write(current_socket, "--[Server]: Welcome", 19);
+            if(i == index) {
+                write(current_socket, ",", 1);
+            }
+            write(current_socket, " ", 1);
+            write(current_socket, new_name, name_size);
+            write(current_socket, "!\n", 2);
         }
-        write(current_socket, " ", 1);
-        write(current_socket, new_name, name_size);
-        write(current_socket, "!\n", 2);
     }
 }
 
@@ -147,6 +156,7 @@ void AppendUsersFD(struct UsersFD* users, int socket_serv) {
         _exit(3);
     } else {
         users->user[users->size - 1].socket = res;
+        users->user[users->size - 1].name = NULL;
         printf("# user_%d joined the chat\n", users->size);
     }
 }
@@ -155,13 +165,26 @@ void DeleteUser(struct UsersFD* users, int leaving_user) {
     int leaving_socket = users->user[leaving_user].socket;
     shutdown(leaving_socket, 2);
     close(leaving_socket);
-    for(int i = leaving_user - 1; i < users->size; i++) {
+    free(users->user[leaving_user].name);
+    for(int i = leaving_user; i < users->size; i++) {
         users->user[i] = users->user[i + 1];
     }
     users->size--;
 }
 
+
 //___________________New_User:___________________
+
+bool IsServerFull(struct UsersFD* users) {
+    const int MAX_CAPACITY = 3;
+    if(users->size > MAX_CAPACITY) {
+        write(users->user[users->size - 1].socket, "--[Server]: Sorry the chat is full\n", 36);
+        printf("# user_%d is removed, because the chat is full\n", users->size);
+        DeleteUser(users, users->size - 1);
+        return true;
+    }
+    return false;
+}
 
 bool IsNameCorrect(char* buf, int size) {
     if(size == 17) {
@@ -185,41 +208,42 @@ bool IsNameMatched(struct UsersFD* users, char* name) {
     return false;
 }
 
-void SelectName(struct UsersFD* users) {
-    int user_socket = users->user[users->size - 1].socket;
-    bool CORRECTNAME = false;
-    while(!CORRECTNAME) {
-        write(user_socket, "--[Server]: Choose your name: ", 30);
-        char* buf = (char*) malloc(17 * sizeof(char));
-        size_t read_res = read(user_socket, buf, 17);
-        if(read_res == 0) {
-            DeleteUser(users, users->size - 1);
-            SayBye(users, users->size - 1);
-        } else {
-            int size;
-            buf = GetString(buf, &size);
-            if(IsNameCorrect(buf, size)) {
-                if(!IsNameMatched(users, buf)) {
-                    users->user[users->size - 1].name = buf;
-                    users->user[users->size - 1].name_size = size;
-                } else {
-                    write(user_socket, "--[Server]: This name is already taken\n", 39);
-                    free(buf);
-                    continue;
-                }
+void SelectName(struct UsersFD* users, int index) {
+    int user_socket = users->user[index].socket;
+    char* buf = (char*) malloc(17 * sizeof(char));
+    size_t read_res = read(user_socket, buf, 17);
+    if(read_res == 0) {
+        SayBye(users, index);
+        DeleteUser(users, index);
+        return;
+    } else {
+        int size;
+        buf = GetString(buf, &size);
+        if(IsNameCorrect(buf, size)) {
+            if(!IsNameMatched(users, buf)) {
+                users->user[index].name = buf;
+                users->user[index].name_size = size;
+                Greetings(users, index);
+                return;
             } else {
-                write(user_socket, "--[Server]: Invalid name\n", 25);
-                free(buf);
+                write(user_socket, "--[Server]: This name is already taken\n", 39);
+                
             }
+        } else {
+            write(user_socket, "--[Server]: Invalid name\n", 25);
         }
     }
-    Greetings(users);
+    free(buf);
+    write(user_socket, "--[Server]: Choose your name: ", 30);
 }
 
 void AcceptUser(struct UsersFD* users, fd_set* set, int socket_serv) {
     if(FD_ISSET(socket_serv, set)) {
         AppendUsersFD(users, socket_serv);
-        SelectName(users);
+        int user_socket = users->user[users->size - 1].socket;
+        if(!IsServerFull(users)) {
+            write(user_socket, "--[Server]: Choose your name: ", 30);
+        }
     }
 }
 
@@ -258,6 +282,65 @@ void InitServer(int* socket_serv, int port) {
     printf("# chat is running at port %d\n", port);
 }
 
+char* GetMessage(struct UsersFD* users, int index) {
+    int current_socket = users->user[index].socket;
+    char* buf = (char*) malloc(1024 * sizeof(char));
+    ssize_t read_res = read(current_socket, buf, 1023);
+    if(read_res == 0) {
+        SayBye(users, index);
+        DeleteUser(users, index);
+        return NULL;
+    }
+    return buf;
+}
+
+bool UserWannaLeave(char* buf) {
+    if(IsStrEq("bye!", buf)) {
+        return true;
+    }
+    return false;
+}
+
+void SendMessage(struct UsersFD* users, int sender, char* message) {
+    int size;
+    message = GetString(message, &size);
+    if(UserWannaLeave(message)) {
+        SayBye(users, sender);
+        DeleteUser(users, sender);
+        return;
+    }
+    char* sender_name = users->user[sender].name;
+    int name_size = users->user[sender].name_size;
+    printf("[%s]: %s\n", sender_name, message);
+    for(int i = 0; i < users->size; i++) {
+        int current_socket = users->user[i].socket;
+        if((i != sender) && (users->user[i].name != NULL)) {
+            write(current_socket, "[", 1);
+            write(current_socket, sender_name, name_size);
+            write(current_socket, "]: ", 3);
+            write(current_socket, message, size);
+            write(current_socket, "\n", 1);
+        }
+    }
+}
+
+void ReadFromUsers(struct UsersFD* users, fd_set* set) {
+    for(int i = 0; i < users->size; i++) {
+        int current_socket = users->user[i].socket;
+        if(FD_ISSET(current_socket, set)) {
+            if(users->user[i].name == NULL) {
+                SelectName(users, i);
+            } else {
+                char* buf = GetMessage(users, i);
+                if(buf != NULL) {
+                    SendMessage(users, i, buf);
+                    free(buf);
+                }
+            }
+        }
+    }
+}
+
 void RunServer(int socket_serv) {
     struct UsersFD users;
     InitUsersFD(&users);
@@ -266,6 +349,7 @@ void RunServer(int socket_serv) {
         int max_d = ResetSet(&users, &set, socket_serv);
         SelectFromSet(&users, &set, max_d);
         AcceptUser(&users, &set, socket_serv);
+        ReadFromUsers(&users, &set);
     }
 }
 
