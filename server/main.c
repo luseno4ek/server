@@ -21,9 +21,15 @@ struct UsersFD {
     int capacity;
 };
 
+//___________________Chat_State:___________________
+
+void SendChatState(struct UsersFD* users) {
+    
+}
+
 //___________________Small_Functions:___________________
 
-void ResetSet(struct UsersFD* users, fd_set* set, int socket_serv) {
+int ResetSet(struct UsersFD* users, fd_set* set, int socket_serv) {
     int max_d = socket_serv;
     FD_ZERO(set);
     FD_SET(socket_serv, set);
@@ -33,6 +39,17 @@ void ResetSet(struct UsersFD* users, fd_set* set, int socket_serv) {
         if(current_socket > max_d) {
             max_d = current_socket;
         }
+    }
+    return max_d;
+}
+
+void SelectFromSet(struct UsersFD* users, fd_set* set, int max_d) {
+    struct timeval time;
+    time.tv_sec = 7;
+    time.tv_usec = 0;
+    int select_res = select(max_d + 1, set, NULL, NULL, &time);
+    if(select_res == 0) {
+        SendChatState(users);
     }
 }
 
@@ -44,8 +61,28 @@ void InitUsersFD(struct UsersFD* users) {
     users->user = (struct User*) malloc(sizeof(struct User) * users->capacity);
 }
 
+void AppendUsersFD(struct UsersFD* users, int socket_serv) {
+    users->size++;
+    if(users->size == users->capacity) {
+        users->capacity *= 2;
+        users->user = (struct User*) realloc(users->user, users->capacity * sizeof(struct User));
+    }
+    int res = accept(socket_serv, NULL, NULL);
+    if(res == -1) {
+        printf("ERROR: fail to accept user\n");
+        _exit(3);
+    } else {
+        users->user[users->size - 1].socket = res;
+    }
+}
+
 //___________________New_User:___________________
 
+void AcceptUser(struct UsersFD* users, fd_set* set, int socket_serv) {
+    if(FD_ISSET(socket_serv, set)) {
+        AppendUsersFD(users, socket_serv);
+    }
+}
 
 //___________________Run_Server:___________________
 
@@ -79,6 +116,7 @@ void InitServer(int* socket_serv, int port) {
         printf("ERROR: Fail to listen socket, try again\n");
         _exit(2);
     }
+    printf("# chat is running at port %d\n", port);
 }
 
 void RunServer(int socket_serv) {
@@ -86,7 +124,9 @@ void RunServer(int socket_serv) {
     InitUsersFD(&users);
     while(true) {
         fd_set set;
-        ResetSet(&users, &set, socket_serv);
+        int max_d = ResetSet(&users, &set, socket_serv);
+        SelectFromSet(&users, &set, max_d);
+        AcceptUser(&users, &set, socket_serv);
     }
 }
 
