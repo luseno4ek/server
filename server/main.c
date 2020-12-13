@@ -102,7 +102,7 @@ void FreeString(struct String* s) {
 void AppendString(struct String* s, struct String* add_s) {
     s->capacity = (int) add_s->size + (int) s->size;
     s->data = (char*) realloc(s->data, s->capacity * sizeof(char));
-    for(int i = 0; i <= add_s->size; i++) {
+    for(int i = 0; i < add_s->size; i++) {
         s->data[s->size + i] = add_s->data[i];
     }
     s->size += add_s->size;
@@ -200,10 +200,11 @@ void Greetings(struct UsersFD* users, int index) {
     for(int i = 0; i < users->size; i++) {
         if(users->user[i].name != NULL) {
             const int current_socket = users->user[i].socket;
-            if(i == index) {
+            if(users->user[index].user_number == users->user[i].user_number) {
                 write(current_socket, buf1, size1);
+            } else {
+                write(current_socket, buf, size);
             }
-            write(current_socket, buf, size);
         }
     }
 }
@@ -353,15 +354,21 @@ bool UserWannaLeave(char* buf) {
     return false;
 }
 
+void CleanMessage(struct UsersFD* users, int sender, int index) {
+    const char* buf = users->user[sender].message.data;
+    const ssize_t size = users->user[sender].message.size;
+    for(int i = 0; i < size - index; i++) {
+        users->user[sender].message.data[i] = buf[i + index];
+    }
+    users->user[sender].message.capacity = (int) size - index;
+    users->user[sender].message.data = (char*) realloc(users->user[sender].message.data, users->user[sender].message.capacity * sizeof(char));
+    users->user[sender].message.size = (int) size - index;
+}
+
 void SendMessage(struct UsersFD* users, int sender, char* message) {
     const int message_size = GetStringSize(message);
     if(users->user[sender].name == NULL) {
         SelectName(users, sender, message);
-        return;
-    }
-    if(UserWannaLeave(message)) {
-        SayBye(users, sender);
-        DeleteUser(users, sender);
         return;
     }
     char* sender_name = users->user[sender].name;
@@ -378,6 +385,31 @@ void SendMessage(struct UsersFD* users, int sender, char* message) {
     free(buf);
 }
 
+void ParceMessage(struct UsersFD* users, int sender) {
+    struct String one_message;
+    struct String full_message = users->user[sender].message;
+    one_message.data = malloc(sizeof(char) * full_message.size);
+    int index = 0;
+    for(int i = 0; i < full_message.size; i++) {
+        one_message.data[i - index] = full_message.data[i];
+        if(one_message.data[i - index] == '\n') {
+            one_message.size = i - index;
+            char* message = GetString(&one_message);
+            if(UserWannaLeave(message)) {
+                SayBye(users, sender);
+                DeleteUser(users, sender);
+                FreeString(&one_message);
+                return;
+            }
+            SendMessage(users, sender, message);
+            index = i + 1;
+            one_message.data = malloc(sizeof(char) * full_message.size - index);
+        }
+    }
+    FreeString(&one_message);
+    CleanMessage(users, sender, index);
+}
+
 //___________________Reading_Message:___________________
 
 bool IsEndOfMessage(struct String* s) {
@@ -387,25 +419,20 @@ bool IsEndOfMessage(struct String* s) {
     return false;
 }
 
-char* ReadString(struct UsersFD* users, int index) {
+bool ReadString(struct UsersFD* users, int index) {
     int user_socket = users->user[index].socket;
     struct String s;
     InitString(&s);
     ssize_t read_res = read(user_socket, s.data, s.capacity);
-    s.size = read_res - 1;
+    s.size = read_res;
     if(read_res == 0) {
         SayBye(users, index);
         DeleteUser(users, index);
         FreeString(&s);
-        return NULL;
+        return false;
     } else {
         AppendString(&(users->user[index].message), &s);
-        if(IsEndOfMessage(&s)) {
-            char* message = GetString(&(users->user[index].message));
-            return message;
-        } else {
-            return NULL;
-        }
+        return true;
     }
 }
 
@@ -413,10 +440,9 @@ void ReadFromUsers(struct UsersFD* users, fd_set* set) {
     for(int i = 0; i < users->size; i++) {
         int current_socket = users->user[i].socket;
         if(FD_ISSET(current_socket, set)) {
-            char* buf = ReadString(users, i);
-            if(buf != NULL) {
-                SendMessage(users, i, buf);
-                InitString(&(users->user[i].message));
+            bool UserSendAMessage = ReadString(users, i);
+            if(UserSendAMessage) {
+                ParceMessage(users, i);
             }
         }
     }
