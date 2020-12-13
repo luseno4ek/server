@@ -17,6 +17,7 @@ struct String {
 
 struct User {
     int socket;
+    int user_number;
     char* name;
     int name_size;
     struct String message;
@@ -51,15 +52,11 @@ int GetStringSize(char* buf) {
 
 void SendChatState(struct UsersFD* users) {
     printf("# chat server is running (%d users are connected...)\n", users->size);
-    char* size = (char*) malloc(2 * sizeof(char));
-    size[0] = users->size + 48;
-    size[1] = '\0';
+    char buf[128];
+    const ssize_t size = sprintf(buf,  "--[Server]: chat server is running (%d users are connected...)\n", users->size);
     for(int i = 0; i < users->size; i++) {
         if(users->user[i].name != NULL) {
-            int current_socket = users->user[i].socket;
-            write(current_socket, "--[Server]: chat server is running (", 36);
-            write(current_socket, size, 2);
-            write(current_socket, " users are connected)\n", 22);
+            write(users->user[i].socket, buf, size);
         }
     }
 }
@@ -125,8 +122,23 @@ void InitUsersFD(struct UsersFD* users) {
     users->user = (struct User*) malloc(sizeof(struct User) * users->capacity);
 }
 
+int GetUniqueNumber(struct UsersFD* users) {
+    bool unique = false;
+    int i = 1;
+    while(!unique) {
+        unique = true;
+        for(int j = 0; j < users->size; j++) {
+            if(i == users->user[j].user_number) {
+                unique = false;
+                i++;
+                break;
+            }
+        }
+    }
+    return i;
+}
+
 void AppendUsersFD(struct UsersFD* users, int socket_serv) {
-    users->size++;
     if(users->size == users->capacity) {
         users->capacity *= 2;
         users->user = (struct User*) realloc(users->user, users->capacity * sizeof(struct User));
@@ -135,12 +147,13 @@ void AppendUsersFD(struct UsersFD* users, int socket_serv) {
     if(res == -1) {
         printf("ERROR: fail to accept user\n");
         _exit(3);
-    } else {
-        users->user[users->size - 1].socket = res;
-        users->user[users->size - 1].name = NULL;
-        InitString(&(users->user[users->size - 1].message));
-        printf("# user_%d joined the chat\n", users->size);
     }
+    users->user[users->size].socket = res;
+    users->user[users->size].user_number = GetUniqueNumber(users);
+    users->user[users->size].name = NULL;
+    InitString(&(users->user[users->size].message));
+    printf("# user_%d joined the chat\n", users->user[users->size].user_number);
+    users->size++;
 }
 
 void DeleteUser(struct UsersFD* users, int leaving_user) {
@@ -149,71 +162,64 @@ void DeleteUser(struct UsersFD* users, int leaving_user) {
     close(leaving_socket);
     free(users->user[leaving_user].name);
     FreeString(&(users->user[leaving_user].message));
-    for(int i = leaving_user; i < users->size; i++) {
-        users->user[i] = users->user[i + 1];
-    }
+    users->user[leaving_user] = users->user[users->size - 1];
     users->size--;
 }
 
 //___________________Greeting_and_FareWell:___________________
 
-char* CreateName(struct UsersFD* users) {
-    char* leaving_name = (char*) malloc(7 * sizeof(char));
-    leaving_name[0] = 'u';
-    leaving_name[1] = 's';
-    leaving_name[2] = 'e';
-    leaving_name[3] = 'r';
-    leaving_name[4] = '_';
-    leaving_name[5] = users->size + 48;
-    leaving_name[6] = '\0';
+char* CreateName(int number) {
+    char* leaving_name = (char*) malloc(12 * sizeof(char));
+    sprintf(leaving_name, "user_%d", number);
     return leaving_name;
 }
 
 void SayBye(struct UsersFD* users, int leaving_user) {
     char* leaving_name = users->user[leaving_user].name;
-    int name_size = users->user[leaving_user].name_size;
     if(leaving_name == NULL) {
-        leaving_name = CreateName(users);
-        name_size = 7;
+        leaving_name = CreateName(users->user[leaving_user].user_number);
     }
     printf("# %s left the chat\n", leaving_name);
+    char buf[128];
+    const int size = sprintf(buf, "--[Server]: %s left the chat.\n", leaving_name);
     for(int i = 0; i < users->size; i++) {
         if((users->user[i].name != NULL) && (i != leaving_user)) {
-            int current_socket = users->user[i].socket;
-            write(current_socket, "--[Server]: ", 12);
-            write(current_socket, leaving_name, name_size);
-            write(current_socket, " left the chat.\n", 16);
+            const int current_socket = users->user[i].socket;
+            write(current_socket, buf, size);
         }
     }
 }
 
 void Greetings(struct UsersFD* users, int index) {
     char* new_name = users->user[index].name;
-    int name_size = users->user[index].name_size;
-    printf("# user_%d changed name to '%s'\n", index + 1, new_name);
+    printf("# user_%d changed name to '%s'\n", users->user[index].user_number, new_name);
+    char buf[128];
+    const int size = sprintf(buf,  "--[Server]: Welcome %s!\n", new_name);
+    char buf1[128];
+    const int size1 = sprintf(buf1, "--[Server]: %s, welcome to our chat!\n", new_name);
     for(int i = 0; i < users->size; i++) {
         if(users->user[i].name != NULL) {
-            int current_socket = users->user[i].socket;
-            write(current_socket, "--[Server]: Welcome", 19);
+            const int current_socket = users->user[i].socket;
             if(i == index) {
-                write(current_socket, ",", 1);
+                write(current_socket, buf1, size1);
             }
-            write(current_socket, " ", 1);
-            write(current_socket, new_name, name_size);
-            write(current_socket, "!\n", 2);
+            write(current_socket, buf, size);
         }
     }
 }
 
 //___________________Name_Changing:___________________
 
+bool IsSymbolOK(char c) {
+    return (c >= 'a' && c <= 'z') || c == '_' || (c >= 'A' && c <= 'Z');
+}
+
 bool IsNameCorrect(char* buf, int size) {
     if((size > 16) || (size < 3)) {
         return false;
     }
     for(int i = 0; i < size; i++) {
-        if(((buf[i] > 64) && (buf[i] < 91)) || (buf[i] == 95) || ((buf[i] > 96) && (buf[i] < 123))) {
-        } else {
+        if(!IsSymbolOK(buf[i])) {
             return false;
         }
     }
@@ -230,8 +236,8 @@ bool IsNameMatched(struct UsersFD* users, char* name) {
 }
 
 void SelectName(struct UsersFD* users, int index, char* buf) {
-    int user_socket = users->user[index].socket;
-    int size = GetStringSize(buf);
+    const int user_socket = users->user[index].socket;
+    const int size = GetStringSize(buf);
     if(IsNameCorrect(buf, size)) {
         if(!IsNameMatched(users, buf)) {
             users->user[index].name = buf;
@@ -239,12 +245,15 @@ void SelectName(struct UsersFD* users, int index, char* buf) {
             Greetings(users, index);
             return;
         } else {
-            write(user_socket, "--[Server]: This name is already taken\n", 39);
+            static const char msg[] = "--[Server]: This name is already taken\n";
+            write(user_socket, msg, strlen(msg));
         }
     } else {
-        write(user_socket, "--[Server]: Invalid name\n", 25);
+        static const char msg[] =  "--[Server]: Invalid name\n";
+        write(user_socket, msg, strlen(msg));
     }
-    write(user_socket, "--[Server]: Choose your name: ", 30);
+    static const char msg[] = "--[Server]: Choose your name: ";
+    write(user_socket, msg, strlen(msg));
 }
 
 //___________________New_User:___________________
@@ -252,7 +261,8 @@ void SelectName(struct UsersFD* users, int index, char* buf) {
 bool IsServerFull(struct UsersFD* users) {
     const int MAX_CAPACITY = 3;
     if(users->size > MAX_CAPACITY) {
-        write(users->user[users->size - 1].socket, "--[Server]: Sorry the chat is full\n", 36);
+        static const char msg [] = "--[Server]: Sorry the chat is full\n";
+        write(users->user[users->size - 1].socket, msg, strlen(msg));
         printf("# user_%d is removed, because the chat is full\n", users->size);
         DeleteUser(users, users->size - 1);
         return true;
@@ -263,46 +273,75 @@ bool IsServerFull(struct UsersFD* users) {
 void AcceptUser(struct UsersFD* users, fd_set* set, int socket_serv) {
     if(FD_ISSET(socket_serv, set)) {
         AppendUsersFD(users, socket_serv);
-        int user_socket = users->user[users->size - 1].socket;
+        const int user_socket = users->user[users->size - 1].socket;
         if(!IsServerFull(users)) {
-            write(user_socket, "--[Server]: Choose your name: ", 30);
+            static const char msg[] = "--[Server]: Choose your name: ";
+            write(user_socket, msg, strlen(msg));
         }
     }
 }
 
 //___________________Init_Server:___________________
 
-void ReadPort(int* port, int argc, char* argv[]) {
+int ReadPort(int argc, char* argv[]) {
+    int port = 0;
     if(argc == 1) {
-        printf("Please run again with port in arguments.\n");
-        _exit(1);
-    } else {
-        for(int i = 0; i < strlen(argv[1]); i++) {
-            *port = *port * 10 + argv[1][i] - 48;
-        }
+        return -1;
     }
+    for(int i = 0; i < strlen(argv[1]); i++) {
+        if(argv[1][i] < '0' || argv[1][i] > '9') {
+            return -1;
+        }
+        port = port * 10 + argv[1][i] - '0';
+    }
+    return port;
 }
 
-void InitServer(int* socket_serv, int port) {
-    *socket_serv = -1;
-    while(*socket_serv == -1) {
-        *socket_serv = socket(AF_INET, SOCK_STREAM, 0);
+int InitServer(int port) {
+    const int socket_serv = socket(AF_INET, SOCK_STREAM, 0);
+    if(socket_serv == -1) {
+        return -1;
     }
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     addr.sin_addr.s_addr = INADDR_ANY;
-    int bind_res = bind(*socket_serv, (struct sockaddr*) &addr, sizeof(addr));
+    const int bind_res = bind(socket_serv, (struct sockaddr*) &addr, sizeof(addr));
     if(bind_res == -1) {
         printf("ERROR: Fail to bind socket, try again\n");
-        _exit(2);
+        return -2;
     }
-    int ls = listen(*socket_serv, 5);
+    const int ls = listen(socket_serv, 5);
     if(ls == -1) {
         printf("ERROR: Fail to listen socket, try again\n");
-        _exit(2);
+        return -3;
     }
     printf("# chat is running at port %d\n", port);
+    return socket_serv;
+}
+
+bool IsPortCorrect(int port) {
+    if(port < 1 || port > 65535) {
+        printf("Run again with port value in arguments.\n");
+        return false;
+    }
+    return true;
+}
+
+bool IsServerInitCorrectly(int socket_serv) {
+    if(socket_serv == -1) {
+        printf("ERROR: Fail to create a socket, try again\n");
+        return false;
+    }
+    if(socket_serv == -2) {
+        printf("ERROR: Fail to bind socket, try again\n");
+        return false;
+    }
+    if(socket_serv == -3) {
+        printf("ERROR: Fail to listen socket, try again\n");
+        return false;
+    }
+    return true;
 }
 
 //___________________Sending_Message:___________________
@@ -315,7 +354,7 @@ bool UserWannaLeave(char* buf) {
 }
 
 void SendMessage(struct UsersFD* users, int sender, char* message) {
-    int size = GetStringSize(message);
+    const int message_size = GetStringSize(message);
     if(users->user[sender].name == NULL) {
         SelectName(users, sender, message);
         return;
@@ -328,16 +367,15 @@ void SendMessage(struct UsersFD* users, int sender, char* message) {
     char* sender_name = users->user[sender].name;
     int name_size = users->user[sender].name_size;
     printf("[%s]: %s\n", sender_name, message);
+    char* buf = malloc((5 + name_size + message_size) * sizeof(char));
+    const int full_size = sprintf(buf, "[%s]: %s\n", sender_name, message);
     for(int i = 0; i < users->size; i++) {
-        int current_socket = users->user[i].socket;
+        const int current_socket = users->user[i].socket;
         if((i != sender) && (users->user[i].name != NULL)) {
-            write(current_socket, "[", 1);
-            write(current_socket, sender_name, name_size);
-            write(current_socket, "]: ", 3);
-            write(current_socket, message, size);
-            write(current_socket, "\n", 1);
+            write(current_socket, buf, full_size);
         }
     }
+    free(buf);
 }
 
 //___________________Reading_Message:___________________
@@ -399,9 +437,13 @@ void RunServer(int socket_serv) {
 }
 
 int main(int argc, char* argv[]) {
-    int port = 0;
-    ReadPort(&port, argc, argv);
-    int socket_serv;
-    InitServer(&socket_serv, port);
+    int port = ReadPort(argc, argv);
+    if(!IsPortCorrect(port)) {
+        return 1;
+    }
+    int socket_serv = InitServer(port);
+    if(!IsServerInitCorrectly(socket_serv)) {
+        return 1;
+    }
     RunServer(socket_serv);
 }
