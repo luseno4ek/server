@@ -19,7 +19,6 @@ struct User {
     int socket;
     int user_number;
     char* name;
-    int name_size;
     struct String message;
 };
 
@@ -138,6 +137,13 @@ int GetUniqueNumber(struct UsersFD* users) {
     return i;
 }
 
+void FulfillNewUser(struct UsersFD* users, int user_socket) {
+    users->user[users->size].socket = user_socket;
+    users->user[users->size].user_number = GetUniqueNumber(users);
+    users->user[users->size].name = NULL;
+    InitString(&(users->user[users->size].message));
+}
+
 void AppendUsersFD(struct UsersFD* users, int socket_serv) {
     if(users->size == users->capacity) {
         users->capacity *= 2;
@@ -148,10 +154,7 @@ void AppendUsersFD(struct UsersFD* users, int socket_serv) {
         printf("ERROR: fail to accept user\n");
         _exit(3);
     }
-    users->user[users->size].socket = res;
-    users->user[users->size].user_number = GetUniqueNumber(users);
-    users->user[users->size].name = NULL;
-    InitString(&(users->user[users->size].message));
+    FulfillNewUser(users, res);
     printf("# user_%d joined the chat\n", users->user[users->size].user_number);
     users->size++;
 }
@@ -236,25 +239,36 @@ bool IsNameMatched(struct UsersFD* users, char* name) {
     return false;
 }
 
+void NameIsTaken(int user_socket) {
+    static const char msg[] = "--[Server]: This name is already taken\n";
+    write(user_socket, msg, strlen(msg));
+}
+
+void InvalidName(int user_socket) {
+    static const char msg[] =  "--[Server]: Invalid name\n";
+    write(user_socket, msg, strlen(msg));
+}
+
+void ChooseName(int user_socket) {
+    static const char msg[] = "--[Server]: Choose your name: ";
+    write(user_socket, msg, strlen(msg));
+}
+
 void SelectName(struct UsersFD* users, int index, char* buf) {
     const int user_socket = users->user[index].socket;
     const int size = GetStringSize(buf);
     if(IsNameCorrect(buf, size)) {
         if(!IsNameMatched(users, buf)) {
             users->user[index].name = buf;
-            users->user[index].name_size = size;
             Greetings(users, index);
             return;
         } else {
-            static const char msg[] = "--[Server]: This name is already taken\n";
-            write(user_socket, msg, strlen(msg));
+            NameIsTaken(user_socket);
         }
     } else {
-        static const char msg[] =  "--[Server]: Invalid name\n";
-        write(user_socket, msg, strlen(msg));
+        InvalidName(user_socket);
     }
-    static const char msg[] = "--[Server]: Choose your name: ";
-    write(user_socket, msg, strlen(msg));
+    ChooseName(user_socket);
 }
 
 //___________________New_User:___________________
@@ -276,8 +290,7 @@ void AcceptUser(struct UsersFD* users, fd_set* set, int socket_serv) {
         AppendUsersFD(users, socket_serv);
         const int user_socket = users->user[users->size - 1].socket;
         if(!IsServerFull(users)) {
-            static const char msg[] = "--[Server]: Choose your name: ";
-            write(user_socket, msg, strlen(msg));
+            ChooseName(user_socket);
         }
     }
 }
@@ -309,12 +322,10 @@ int InitServer(int port) {
     addr.sin_addr.s_addr = INADDR_ANY;
     const int bind_res = bind(socket_serv, (struct sockaddr*) &addr, sizeof(addr));
     if(bind_res == -1) {
-        printf("ERROR: Fail to bind socket, try again\n");
         return -2;
     }
     const int ls = listen(socket_serv, 5);
     if(ls == -1) {
-        printf("ERROR: Fail to listen socket, try again\n");
         return -3;
     }
     printf("# chat is running at port %d\n", port);
@@ -366,15 +377,14 @@ void CleanMessage(struct UsersFD* users, int sender, int index) {
 }
 
 void SendMessage(struct UsersFD* users, int sender, char* message) {
-    const int message_size = GetStringSize(message);
     if(users->user[sender].name == NULL) {
         SelectName(users, sender, message);
         return;
     }
+    const int message_size = GetStringSize(message);
     char* sender_name = users->user[sender].name;
-    int name_size = users->user[sender].name_size;
     printf("[%s]: %s\n", sender_name, message);
-    char* buf = malloc((5 + name_size + message_size) * sizeof(char));
+    char* buf = malloc((21 + message_size) * sizeof(char));
     const int full_size = sprintf(buf, "[%s]: %s\n", sender_name, message);
     for(int i = 0; i < users->size; i++) {
         const int current_socket = users->user[i].socket;
@@ -411,13 +421,6 @@ void ParceMessage(struct UsersFD* users, int sender) {
 }
 
 //___________________Reading_Message:___________________
-
-bool IsEndOfMessage(struct String* s) {
-    if(s->data[s->size - 1] == '\r') {
-        return true;
-    }
-    return false;
-}
 
 bool ReadString(struct UsersFD* users, int index) {
     int user_socket = users->user[index].socket;
