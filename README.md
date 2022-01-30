@@ -11,23 +11,21 @@
 ### Пример работы сервера
 
 (base) luseno4ek@MacBook-Air-Olesya server % ./main 747
-# chat is running at port 747
-# chat server is running (0 users are connected...)
-# chat server is running (0 users are connected...)
-# user_1 joined the chat
-# user_1 changed name to 'lusenochek'
+\# chat is running at port 747
+\# chat server is running (0 users are connected...)
+\# user_1 joined the chat
+\# user_1 changed name to 'lusenochek'
 [lusenochek]: hi!
-# chat server is running (1 users are connected...)
-# chat server is running (1 users are connected...)
-# user_2 joined the chat
-# user_2 changed name to 'kotik'
+\# chat server is running (1 users are connected...)
+\# user_2 joined the chat
+\# user_2 changed name to 'kotik'
 [kotik]: hello!
-# chat server is running (2 users are connected...)
+\# chat server is running (2 users are connected...)
 [lusenochek]: hi!
-# chat server is running (2 users are connected...)
+\# chat server is running (2 users are connected...)
 [lusenochek]: I'm leaving
-# lusenochek left the chat
+\# lusenochek left the chat
 [kotik]: bye lusenochek!
-# kotik left the chat
-# chat server is running (0 users are connected...)
-# chat server is running (0 users are connected...)
+\# kotik left the chat
+\# chat server is running (0 users are connected...)
+
