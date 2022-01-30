@@ -9,7 +9,7 @@
 При подключении нового пользователя чат запрашивает у пользователя уникальное имя. Выйти из чата пользователь может с помощью команды **bye!**. В течение рабочей сессии сервер отправляет сообщения о состоянии чата (количество подключенных пользователей) и о новых событиях - подключении и отключении пользователей.
 
 ### Пример работы сервера
-
+'''
 (base) luseno4ek@MacBook-Air-Olesya server % ./main 747 <br>
 \# chat is running at port 747<br>
 \# chat server is running (0 users are connected...)<br>
@@ -28,4 +28,4 @@
 [kotik]: bye lusenochek!<br>
 \# kotik left the chat<br>
 \# chat server is running (0 users are connected...)<br>
-
+'''
